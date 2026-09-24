@@ -5,10 +5,11 @@ ensemble quality scoring, normalized risk vectors, explainable decision traces,
 counterfactual sensitivity analysis, and cohort anomaly evaluation.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import numpy as np
 
 from cv.preprocessing import validate_and_preprocess
+from cv.pdf_loader import is_pdf, load_pdf_pages
 from cv.blur import analyze_blur
 from cv.contrast import analyze_contrast
 from cv.skew import analyze_skew
@@ -180,4 +181,96 @@ def analyze_document_quality(
 
         # Metadata
         "image_metadata": meta
+    }
+
+
+def analyze_pdf_quality(
+    pdf_source: Any,
+    scale: float = 2.0,
+    max_pages: Optional[int] = None,
+    progress_callback = None
+) -> Dict[str, Any]:
+    """
+    Analyzes all pages of a multi-page PDF document and produces a unified
+    multi-page quality report with governing bottleneck routing.
+
+    Args:
+        pdf_source: Filepath, bytes, or file-like stream of the PDF.
+        scale: Resolution multiplier for rasterization (default 2.0 = ~144 DPI).
+        max_pages: Optional maximum number of pages to inspect.
+        progress_callback: Optional callable(current_page, total_pages, message).
+
+    Returns:
+        Master dictionary with aggregate quality metrics, bottleneck analysis,
+        and per-page detailed inspection records.
+    """
+    pages_data = load_pdf_pages(pdf_source, scale=scale, max_pages=max_pages)
+    if not pages_data:
+        raise ValueError("Could not extract any valid pages from the PDF document.")
+
+    page_results = []
+    page_qis = []
+    page_decisions = []
+    all_reasons = []
+
+    for idx, (p_num, bgr_img, p_meta) in enumerate(pages_data):
+        if progress_callback:
+            progress_callback(idx + 1, len(pages_data), f"Page {p_num}")
+        page_analysis = analyze_document_quality(bgr_img)
+        page_analysis["page_number"] = p_num
+        page_analysis["page_metadata"] = p_meta
+        page_results.append(page_analysis)
+
+        qi = page_analysis["quality_index"]
+        page_qis.append(qi)
+        page_decisions.append(page_analysis["decision"])
+        all_reasons.extend([
+            f"[Page {p_num}] {r}" for r in page_analysis["reasons"]
+            if r != "All quality parameters within operational tolerances."
+        ])
+
+    # Governance rule:
+    # 1. Bottleneck page governs compliance
+    min_qi = min(page_qis)
+    mean_qi = round(float(np.mean(page_qis)), 1)
+    worst_page_idx = int(np.argmin(page_qis))
+    bottleneck_page = page_results[worst_page_idx]["page_number"]
+
+    # Overall decision: REJECT if any REJECT; else NEEDS REVIEW if any REVIEW; else PASS
+    if "REJECT" in page_decisions:
+        doc_decision = "REJECT"
+        doc_trigger = f"Fatal rejection on Page {bottleneck_page} (Score: {min_qi:.1f})"
+    elif "NEEDS REVIEW" in page_decisions:
+        doc_decision = "NEEDS REVIEW"
+        doc_trigger = f"Quality review triggered on Page {bottleneck_page} (Score: {min_qi:.1f})"
+    else:
+        doc_decision = "PASS"
+        doc_trigger = f"All {len(pages_data)} pages satisfy intake quality thresholds (Mean Score: {mean_qi:.1f})"
+
+    return {
+        "document_type": "PDF",
+        "total_pages": len(pages_data),
+        "quality_index": mean_qi,
+        "mean_quality_index": mean_qi,
+        "bottleneck_quality_index": min_qi,
+        "bottleneck_page": bottleneck_page,
+        "decision": doc_decision,
+        "decision_trigger": doc_trigger,
+        "intake_accepted": (doc_decision == "PASS"),
+        "reasons": all_reasons if all_reasons else ["All pages satisfy technical quality standards."],
+        "page_results": page_results,
+        "summary_table": [
+            {
+                "page": p["page_number"],
+                "quality_index": p["quality_index"],
+                "decision": p["decision"],
+                "dominant_risk": p["risk_vector"]["primary_risk"]["label"],
+                "blur": p["defects"]["blur"]["score"],
+                "contrast": p["defects"]["contrast"]["score"],
+                "skew": p["defects"]["skew"]["angle"],
+                "noise": p["defects"]["noise"]["score"],
+                "handwriting": p["defects"]["handwriting"]["detected"]
+            }
+            for p in page_results
+        ]
     }
