@@ -1,27 +1,29 @@
+import os
 import cv2
 
 from modules.analyzer import analyze_document
 
 
+DATA_DIR = "Datas"
+
 images = {
-    "Missing full Document": "Document_quality_gate/Datas/miss_full.png",
-    "Blur Document": "Document_quality_gate/Datas/blur.jpeg",
-    "Low Contrast": "Document_quality_gate/Datas/contrast.jpg",
-    "Noisy Document": "Document_quality_gate/Datas/noise.png",
-    "Skewed Document": "Document_quality_gate/Datas/skew.jpeg",
-    "Handwriting": "Document_quality_gate/Datas/handwrit.png",
-    "Missing Bottom": "Document_quality_gate/Datas/miss_bottom.png",
-    "Missing Middle + Bottom": "Document_quality_gate/Datas/miss_midbot.png",
-    "Missing Top": "Document_quality_gate/Datas/miss_top.png"
+    "Missing full Document": os.path.join(DATA_DIR, "miss_full.png"),
+    "Blur Document": os.path.join(DATA_DIR, "blur.jpeg"),
+    "Low Contrast": os.path.join(DATA_DIR, "contrast.jpg"),
+    "Noisy Document": os.path.join(DATA_DIR, "noise.png"),
+    "Skewed Document": os.path.join(DATA_DIR, "skew.jpeg"),
+    "Handwriting": os.path.join(DATA_DIR, "handwrit.png"),
+    "Missing Bottom": os.path.join(DATA_DIR, "miss_bottom.png"),
+    "Missing Middle + Bottom": os.path.join(DATA_DIR, "miss_midbot.png"),
+    "Missing Top": os.path.join(DATA_DIR, "miss_top.png")
 }
 
 
 for name, path in images.items():
-
     image = cv2.imread(path)
 
     if image is None:
-        print(f"\nCould not load: {name}")
+        print(f"\nCould not load: {name} (path: {path})")
         continue
 
     result = analyze_document(image)
