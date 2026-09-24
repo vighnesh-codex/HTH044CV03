@@ -9,8 +9,10 @@ def route_document(score, defects):
     if defects["contrast"]["status"] == "poor":
         reasons.append("Low contrast detected")
 
-    if defects["skew"]["status"] == "poor":
-        reasons.append("Severe document skew detected")
+    skew_angle = abs(defects["skew"]["angle"])
+    if skew_angle > 5:
+        reasons.append("Significant document skew detected")
+
 
     if defects["noise"]["status"] == "poor":
         reasons.append("High image noise detected")
