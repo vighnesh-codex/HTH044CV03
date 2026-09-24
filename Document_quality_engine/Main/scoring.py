@@ -1,3 +1,4 @@
+#this program is to find the score for the documents 
 WEIGHTS = {
     "blur": 0.25,
     "contrast": 0.20,
