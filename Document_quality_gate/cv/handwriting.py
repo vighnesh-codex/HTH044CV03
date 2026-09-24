@@ -80,19 +80,46 @@ def analyze_handwriting(image: np.ndarray) -> Dict[str, Any]:
         cv2.CHAIN_APPROX_SIMPLE
     )
 
-    valid_contours = []
-    bounding_boxes: List[List[int]] = []
-    stroke_contrasts: List[float] = []
-    pen_strokes = 0
+    # First pass: collect candidate components and identify horizontal printed text lines
+    raw_components = []
+    line_buckets: Dict[int, List[Tuple[int, int, int, int]]] = {}
 
     for contour in contours:
         area = cv2.contourArea(contour)
         if area < 80 or area > 10000:
             continue
-
         x, y, w, h = cv2.boundingRect(contour)
         if w > 6 * h or h > 6 * w:
             continue
+        raw_components.append((contour, x, y, w, h, area))
+
+        # Bucket into horizontal lines (within 5 px)
+        matched_line = None
+        for ly in line_buckets:
+            if abs(y - ly) <= 5:
+                matched_line = ly
+                break
+        if matched_line is not None:
+            line_buckets[matched_line].append((x, y, w, h))
+        else:
+            line_buckets[y] = [(x, y, w, h)]
+
+    # Identify lines with >= 5 components and uniform heights (printed text lines)
+    printed_line_ys = set()
+    for ly, box_list in line_buckets.items():
+        if len(box_list) >= 5:
+            hs = [b[3] for b in box_list]
+            if float(np.std(hs)) <= 8.0:
+                printed_line_ys.add(ly)
+
+    valid_contours = []
+    bounding_boxes: List[List[int]] = []
+    stroke_contrasts: List[float] = []
+    pen_strokes = 0
+
+    for contour, x, y, w, h, area in raw_components:
+        # Check if component lies within an identified machine-printed text line
+        is_printed_line = any(abs(y - ly) <= 5 for ly in printed_line_ys)
 
         perimeter = cv2.arcLength(contour, True)
         if perimeter <= 0:
@@ -146,6 +173,11 @@ def analyze_handwriting(image: np.ndarray) -> Dict[str, Any]:
                 # Verified pen ink on light paper
                 if color_ratio > 0.35 and bg_m > 160:
                     is_color_pen = True
+
+        # Machine-printed text line exclusion:
+        # If the component aligns horizontally on a standard printed line, exclude it unless verified colored pen
+        if is_printed_line and not is_color_pen:
+            continue
 
         # True handwriting stroke criteria:
         # High contrast ink AND (cursive loopy morphology: tortuosity >= 4.5 and solidity <= 0.45, OR verified color pen)

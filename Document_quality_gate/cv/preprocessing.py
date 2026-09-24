@@ -4,21 +4,22 @@ Provides robust image validation, color-space normalization, aspect-ratio-preser
 resizing, and grayscale conversion for document quality analysis.
 """
 
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Union
 import cv2
 import numpy as np
+from cv.pdf_loader import is_pdf, load_single_pdf_page
 
 
 def validate_and_preprocess(
-    image: np.ndarray,
+    image: Union[np.ndarray, str, bytes, Any],
     max_size: int = 2000
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """
-    Validates input image, standardizes channel format (BGR and Grayscale),
+    Validates input image or PDF document, standardizes channel format (BGR and Grayscale),
     and resizes large documents while preserving aspect ratio.
 
     Args:
-        image: Input numpy array representing the image (BGR, BGRA, or Grayscale).
+        image: Input numpy array representing the image, or a PDF file path/bytes.
         max_size: Maximum pixel dimension for width or height.
 
     Returns:
@@ -27,8 +28,13 @@ def validate_and_preprocess(
     if image is None:
         raise ValueError("Invalid image: Input is None. Please provide a valid document image.")
 
+    # Automatically handle PDF input by rasterizing page 1
+    pdf_meta = None
+    if is_pdf(image):
+        image, pdf_meta = load_single_pdf_page(image, page_number=1, scale=2.0)
+
     if not isinstance(image, np.ndarray):
-        raise TypeError("Invalid image: Input must be a numpy ndarray.")
+        raise TypeError(f"Invalid image: Input must be a numpy ndarray (or valid PDF), got {type(image)}.")
 
     if image.size == 0 or image.ndim < 2:
         raise ValueError("Invalid image: Image array is empty or has invalid dimensions.")
@@ -80,6 +86,8 @@ def validate_and_preprocess(
         "width": bgr_image.shape[1],
         "height": bgr_image.shape[0]
     }
+    if pdf_meta is not None:
+        metadata["pdf"] = pdf_meta
 
     return bgr_image, gray_image, metadata
 

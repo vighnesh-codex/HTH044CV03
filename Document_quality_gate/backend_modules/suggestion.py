@@ -7,6 +7,7 @@ def generate_suggestions(defects):
         suggestions.append(
             "Rescan the document with better focus."
         )
+        
 
     if defects["contrast"]["status"] == "poor":
         suggestions.append(
