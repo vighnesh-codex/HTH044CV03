@@ -13,7 +13,8 @@ import streamlit as st
 
 from cv.preprocessing import validate_and_preprocess
 from cv.forensics import analyze_document_forensics
-from intelligence.engine import analyze_document_quality
+from cv.pdf_loader import is_pdf, load_pdf_pages, load_single_pdf_page
+from intelligence.engine import analyze_document_quality, analyze_pdf_quality
 from intelligence.sensitivity import analyze_quality_sensitivity
 from intelligence.comparison import compare_document_analyses
 from intelligence.batch import process_document_batch
@@ -137,6 +138,9 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Datas")
 def load_sample_image(filename: str):
     path = os.path.join(DATA_DIR, filename)
     if os.path.exists(path):
+        if filename.lower().endswith(".pdf") or is_pdf(path):
+            img, _ = load_single_pdf_page(path, page_number=1)
+            return img
         return cv2.imread(path)
     return None
 
@@ -184,32 +188,125 @@ if nav_mode == "Single Document Analysis":
     st.title("📄 Document Quality Intelligence Gate")
     st.write("Examine technical quality, localize optical defects, inspect forensic compression, and generate verified intake audit passports.")
 
-    # Image Input
+    # Document Input (Images or PDFs)
     col_input1, col_input2 = st.columns([2, 1])
     with col_input1:
         uploaded_file = st.file_uploader(
-            "Upload Document Image for Intake Inspection",
-            type=["png", "jpg", "jpeg", "bmp", "tiff"]
+            "Upload Document (Image or PDF) for Intake Inspection",
+            type=["png", "jpg", "jpeg", "bmp", "tiff", "pdf"]
         )
 
     with col_input2:
         sample_choice = st.selectbox(
             "Or select benchmark sample:",
-            ["(None)", "blur.jpeg", "contrast.jpg", "skew.jpeg", "noise.png", "handwrit.png", "miss_bottom.png", "miss_midbot.png", "miss_top.png"]
+            [
+                "(None)",
+                "sample_document.pdf",
+                "blur.jpeg",
+                "contrast.jpg",
+                "skew.jpeg",
+                "noise.png",
+                "handwrit.png",
+                "miss_bottom.png",
+                "miss_midbot.png",
+                "miss_top.png"
+            ]
         )
 
     image_to_process = None
     doc_name = "uploaded_document"
+    is_pdf_doc = False
+    pdf_source = None
+    pdf_pages = []
+    total_pdf_pages = 0
+    show_multipage_summary = False
 
     if uploaded_file is not None:
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image_to_process = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        file_bytes = uploaded_file.read()
         doc_name = uploaded_file.name
+        if uploaded_file.name.lower().endswith(".pdf") or is_pdf(file_bytes):
+            is_pdf_doc = True
+            pdf_source = file_bytes
+            pdf_pages = load_pdf_pages(file_bytes, scale=2.0)
+            total_pdf_pages = len(pdf_pages)
+        else:
+            nparr = np.asarray(bytearray(file_bytes), dtype=np.uint8)
+            image_to_process = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     elif sample_choice != "(None)":
-        image_to_process = load_sample_image(sample_choice)
         doc_name = sample_choice
+        sample_path = os.path.join(DATA_DIR, sample_choice)
+        if sample_choice.lower().endswith(".pdf") or is_pdf(sample_path):
+            is_pdf_doc = True
+            pdf_source = sample_path
+            pdf_pages = load_pdf_pages(sample_path, scale=2.0)
+            total_pdf_pages = len(pdf_pages)
+        else:
+            image_to_process = load_sample_image(sample_choice)
 
-    if image_to_process is not None:
+    if is_pdf_doc and total_pdf_pages > 1:
+        st.info(f"📑 Multi-page PDF detected: **{doc_name}** ({total_pdf_pages} Total Pages)")
+        pdf_mode = st.radio(
+            "PDF Intake View Option:",
+            ["Full Multi-Page Intake Audit Summary", "Inspect Specific Page Diagnostics"],
+            horizontal=True
+        )
+        if pdf_mode == "Full Multi-Page Intake Audit Summary":
+            show_multipage_summary = True
+        else:
+            page_num = st.slider("Select Page to Inspect:", 1, total_pdf_pages, 1)
+            image_to_process = pdf_pages[page_num - 1][1]
+            doc_name = f"{doc_name} (Page {page_num})"
+    elif is_pdf_doc and total_pdf_pages == 1:
+        image_to_process = pdf_pages[0][1]
+        doc_name = f"{doc_name} (Page 1)"
+
+    if show_multipage_summary and pdf_source is not None:
+        with st.spinner(f"Analyzing all {total_pdf_pages} pages across multi-scale CV layers..."):
+            pdf_analysis = analyze_pdf_quality(pdf_source)
+
+        st.divider()
+        b_col1, b_col2, b_col3, b_col4 = st.columns([1.3, 1, 1, 1])
+        with b_col1:
+            dec = pdf_analysis["decision"]
+            if dec == "PASS":
+                st.markdown(f'<div class="verdict-pass">VERDICT: {dec}</div>', unsafe_allow_html=True)
+            elif dec == "NEEDS REVIEW":
+                st.markdown(f'<div class="verdict-review">VERDICT: {dec}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="verdict-reject">VERDICT: {dec}</div>', unsafe_allow_html=True)
+            st.caption(f"Governance Trigger: {pdf_analysis['decision_trigger']}")
+
+        with b_col2:
+            st.metric("Mean Quality Index", f"{pdf_analysis['mean_quality_index']:.1f} / 100")
+        with b_col3:
+            st.metric("Bottleneck Page", f"Page {pdf_analysis['bottleneck_page']}", f"{pdf_analysis['bottleneck_quality_index']:.1f} / 100")
+        with b_col4:
+            st.metric("Total Pages Analyzed", pdf_analysis["total_pages"])
+
+        st.subheader("📑 Page-by-Page Quality Scorecard")
+        summary_df = pd.DataFrame(pdf_analysis["summary_table"])
+        st.dataframe(summary_df, use_container_width=True)
+
+        st.subheader("📈 Multi-Page Quality Trajectory")
+        chart_data = pd.DataFrame({
+            "Page": [f"P{p['page']}" for p in pdf_analysis["summary_table"]],
+            "Quality Index": [p["quality_index"] for p in pdf_analysis["summary_table"]]
+        }).set_index("Page")
+        st.bar_chart(chart_data)
+
+        st.subheader("🖼️ Page Previews & Quality Badges")
+        preview_cols = st.columns(min(4, total_pdf_pages))
+        for idx, (p_num, bgr_img, _) in enumerate(pdf_pages[:8]):
+            with preview_cols[idx % len(preview_cols)]:
+                p_qi = pdf_analysis["page_results"][idx]["quality_index"]
+                p_dec = pdf_analysis["page_results"][idx]["decision"]
+                st.image(bgr_to_rgb(bgr_img), caption=f"Page {p_num}: {p_dec} ({p_qi:.1f})", use_container_width=True)
+
+        st.subheader("📋 Decision Trace & Governance Reasons")
+        for reason in pdf_analysis["reasons"]:
+            st.markdown(f"- {reason}")
+
+    elif image_to_process is not None:
         with st.spinner("Analyzing document across multi-scale CV layers..."):
             analysis = analyze_document_quality(image_to_process)
             doc_id = save_analysis_record(doc_name, analysis)
@@ -646,24 +743,35 @@ elif nav_mode == "Batch Intake & Epidemiology":
     st.write("Process document cohorts at scale, analyze defect distributions, and route batches automatically.")
 
     batch_files = st.file_uploader(
-        "Upload Cohort Documents",
-        type=["png", "jpg", "jpeg"],
+        "Upload Cohort Documents (Images or PDFs)",
+        type=["png", "jpg", "jpeg", "bmp", "tiff", "pdf"],
         accept_multiple_files=True
     )
 
-    use_samples = st.checkbox("Or process all 9 built-in hackathon dataset images in batch", value=False)
+    use_samples = st.checkbox("Or process all built-in benchmark dataset documents in batch", value=False)
 
     batch_items = []
     if batch_files:
         for f in batch_files:
-            b_bytes = np.asarray(bytearray(f.read()), dtype=np.uint8)
-            b_img = cv2.imdecode(b_bytes, cv2.IMREAD_COLOR)
-            if b_img is not None:
-                batch_items.append((f.name, b_img))
+            file_bytes = f.read()
+            if f.name.lower().endswith(".pdf") or is_pdf(file_bytes):
+                pages = load_pdf_pages(file_bytes)
+                for p_num, p_img, _ in pages:
+                    batch_items.append((f"{f.name} [Page {p_num}]", p_img))
+            else:
+                b_bytes = np.asarray(bytearray(file_bytes), dtype=np.uint8)
+                b_img = cv2.imdecode(b_bytes, cv2.IMREAD_COLOR)
+                if b_img is not None:
+                    batch_items.append((f.name, b_img))
     elif use_samples:
-        for fname in os.listdir(DATA_DIR):
-            if fname.lower().endswith((".png", ".jpg", ".jpeg")):
-                b_img = cv2.imread(os.path.join(DATA_DIR, fname))
+        for fname in sorted(os.listdir(DATA_DIR)):
+            p = os.path.join(DATA_DIR, fname)
+            if fname.lower().endswith(".pdf") or is_pdf(p):
+                pages = load_pdf_pages(p)
+                for p_num, p_img, _ in pages:
+                    batch_items.append((f"{fname} [Page {p_num}]", p_img))
+            elif fname.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
+                b_img = cv2.imread(p)
                 if b_img is not None:
                     batch_items.append((fname, b_img))
 

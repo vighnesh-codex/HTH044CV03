@@ -244,9 +244,6 @@ class TestDocumentQualityIntelligenceEngine(unittest.TestCase):
         self.assertIsInstance(suggestions, list)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 from cv.forensics import analyze_document_forensics
 from evidence.radar import generate_quality_radar_chart
 from intelligence.passport import generate_html_audit_passport
@@ -297,3 +294,54 @@ class TestAdvancedFeatures(unittest.TestCase):
             # Faint chaotic scribbles should have low legibility score
             self.assertLess(res["score"], 80)
             self.assertIn(res["legibility_verdict"], ["NEEDS REVIEW", "REJECT"])
+
+    # 21. PDF Loader Verification
+    def test_21_pdf_loader_single_and_multipage(self):
+        from cv.pdf_loader import is_pdf, load_pdf_pages, load_single_pdf_page, get_pdf_page_count
+        pdf_path = os.path.join(DATA_DIR, "sample_document.pdf")
+        if os.path.exists(pdf_path):
+            self.assertTrue(is_pdf(pdf_path))
+            count = get_pdf_page_count(pdf_path)
+            self.assertEqual(count, 2)
+
+            pages = load_pdf_pages(pdf_path, scale=1.5)
+            self.assertEqual(len(pages), 2)
+            p_num, bgr, meta = pages[0]
+            self.assertEqual(p_num, 1)
+            self.assertIsInstance(bgr, np.ndarray)
+            self.assertEqual(bgr.ndim, 3)
+            self.assertEqual(bgr.shape[2], 3)
+
+            # Single page loader
+            single_img, single_meta = load_single_pdf_page(pdf_path, page_number=2, scale=1.5)
+            self.assertIsInstance(single_img, np.ndarray)
+            self.assertEqual(single_meta["page_number"], 2)
+
+    # 22. PDF Multi-Page Quality Intelligence Analysis
+    def test_22_analyze_pdf_quality(self):
+        from intelligence.engine import analyze_pdf_quality
+        pdf_path = os.path.join(DATA_DIR, "sample_document.pdf")
+        if os.path.exists(pdf_path):
+            res = analyze_pdf_quality(pdf_path)
+            self.assertEqual(res["document_type"], "PDF")
+            self.assertEqual(res["total_pages"], 2)
+            self.assertIn("quality_index", res)
+            self.assertIn("mean_quality_index", res)
+            self.assertIn("bottleneck_quality_index", res)
+            self.assertIn("bottleneck_page", res)
+            self.assertIn("decision", res)
+            self.assertIn(res["decision"], ["PASS", "NEEDS REVIEW", "REJECT"])
+            self.assertEqual(len(res["summary_table"]), 2)
+            self.assertEqual(len(res["page_results"]), 2)
+
+    # 23. Corrupted PDF Error Handling
+    def test_23_corrupted_pdf_handling(self):
+        from cv.pdf_loader import is_pdf, load_pdf_pages
+        corrupted_bytes = b"CORRUPTED_NON_PDF_DATA_STREAM"
+        self.assertFalse(is_pdf(corrupted_bytes))
+        with self.assertRaises(ValueError):
+            load_pdf_pages(corrupted_bytes)
+
+
+if __name__ == "__main__":
+    unittest.main()
