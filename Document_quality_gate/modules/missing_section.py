@@ -8,7 +8,7 @@ def analyze_missing_section(image):
     Check whether important regions of a document contain content.
 
     Returns:
-        score: Completeness score from 0 to 100.
+        score: missing_section score from 0 to 100.
         missing: List of regions that appear empty.
     """
 

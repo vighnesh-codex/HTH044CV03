@@ -42,16 +42,16 @@ def main():
             "confidence": analysis["handwriting"]["confidence"]
         },
 
-        "completeness": {
-            "score": analysis["completeness"]["score"],
+        "missing_section": {
+            "score": analysis["missing_section"]["score"],
             "status": (
                 "good"
-                if analysis["completeness"]["score"] >= 80
+                if analysis["missing_section"]["score"] >= 80
                 else "poor"
             )
         },
 
-        "missing_sections": analysis["completeness"]["missing"]
+        "missing_sections": analysis["missing_section"]["missing"]
     }
 
         score = calculate_quality_score(defects)

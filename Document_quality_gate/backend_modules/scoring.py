@@ -4,7 +4,7 @@ WEIGHTS = {
     "contrast": 0.20,
     "skew": 0.15,
     "noise": 0.15,
-    "completeness": 0.15,
+    "missing_section": 0.15,
     "handwriting": 0.10
 }
 
@@ -13,7 +13,7 @@ def calculate_quality_score(defects):
     blur = defects["blur"]["score"]
     contrast = defects["contrast"]["score"]
     noise = defects["noise"]["score"]
-    completeness = defects.get("completeness", {}).get("score", 100)
+    missing_section = defects.get("missing_section", {}).get("score", 100)
 
     skew_angle = abs(defects["skew"].get("angle", 0))
 
@@ -35,7 +35,7 @@ def calculate_quality_score(defects):
         contrast * WEIGHTS["contrast"] +
         skew * WEIGHTS["skew"] +
         noise * WEIGHTS["noise"] +
-        completeness * WEIGHTS["completeness"] +
+        missing_section * WEIGHTS["missing_section"] +
         handwriting * WEIGHTS["handwriting"]
     )
 

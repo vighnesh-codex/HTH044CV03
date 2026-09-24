@@ -35,4 +35,4 @@ for name, path in images.items():
     print("Skew:", result["skew"])
     print("Noise:", result["noise"])
     print("Handwriting:", result["handwriting"])
-    print("Completeness:", result["completeness"])
+    print("missing_section:", result["missing_section"])

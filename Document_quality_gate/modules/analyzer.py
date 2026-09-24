@@ -13,7 +13,7 @@ def analyze_document(image):
     skew = analyze_skew(image)
     noise = analyze_noise(image)
     handwriting = analyze_handwriting(image)
-    completeness = analyze_missing_section(image)
+    missing_section = analyze_missing_section(image)
 
     return {
         "blur": blur,
@@ -21,5 +21,5 @@ def analyze_document(image):
         "skew": skew,
         "noise": noise,
         "handwriting": handwriting,
-        "completeness": completeness
+        "missing_section": missing_section
     }
