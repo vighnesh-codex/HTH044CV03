@@ -25,6 +25,12 @@ from intelligence.comparison import compare_document_analyses
 from correction.simulator import simulate_corrections
 from correction.enhancement import apply_contrast_enhancement
 from correction.deskew import apply_deskew
+from cv.ocr import (
+    is_tesseract_available,
+    extract_sample_ocr,
+    generate_ocr_word_overlay,
+    compare_ocr_impact
+)
 
 from modules.analyzer import analyze_document
 from backend_modules.scoring import calculate_quality_score
@@ -342,6 +348,59 @@ class TestAdvancedFeatures(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_pdf_pages(corrupted_bytes)
 
+    # 24. Tesseract OCR Sample Extraction
+    def test_24_tesseract_ocr_extraction(self):
+        if not is_tesseract_available():
+            self.skipTest("Tesseract OCR binary not found in PATH")
+        res = extract_sample_ocr(self.clean_doc)
+        self.assertTrue(res["available"])
+        self.assertTrue(res["success"])
+        self.assertGreater(res["word_count"], 0)
+        self.assertGreater(res["average_confidence"], 50.0)
+        self.assertIn(res["ocr_readiness"], ["OPTIMAL", "ACCEPTABLE"])
+        self.assertIn("confidence_distribution", res)
+
+    # 25. OCR Word Overlay Generation
+    def test_25_ocr_word_overlay_generation(self):
+        if not is_tesseract_available():
+            self.skipTest("Tesseract OCR binary not found in PATH")
+        res = extract_sample_ocr(self.clean_doc)
+        overlay = generate_ocr_word_overlay(self.clean_doc, res)
+        self.assertIsInstance(overlay, np.ndarray)
+        self.assertEqual(overlay.shape, self.clean_doc.shape)
+        self.assertEqual(overlay.ndim, 3)
+
+    # 26. OCR on Low-Quality / Blank Document
+    def test_26_ocr_on_low_quality_document(self):
+        if not is_tesseract_available():
+            self.skipTest("Tesseract OCR binary not found in PATH")
+        blank_img = np.full((400, 400, 3), 255, dtype=np.uint8)
+        res = extract_sample_ocr(blank_img)
+        self.assertTrue(res["available"])
+        self.assertEqual(res["word_count"], 0)
+        self.assertEqual(res["ocr_readiness"], "FAILED")
+
+    # 27. OCR Impact Comparison (Raw vs Restored / Degraded)
+    def test_27_compare_ocr_impact(self):
+        if not is_tesseract_available():
+            self.skipTest("Tesseract OCR binary not found in PATH")
+        degraded = cv2.GaussianBlur(self.clean_doc, (45, 45), 0)
+        cmp_res = compare_ocr_impact(degraded, self.clean_doc)
+        self.assertIn("word_delta", cmp_res)
+        self.assertIn("confidence_delta", cmp_res)
+        self.assertGreaterEqual(cmp_res["restored_word_count"], cmp_res["raw_word_count"])
+        self.assertIn("impact_summary", cmp_res)
+
+    # 28. Engine include_ocr Parameter Support
+    def test_28_engine_include_ocr_support(self):
+        res = analyze_document_quality(self.clean_doc, include_ocr=True)
+        self.assertIn("sample_ocr", res)
+        if is_tesseract_available():
+            self.assertTrue(res["sample_ocr"]["available"])
+            self.assertTrue(res["sample_ocr"]["success"])
+            self.assertGreater(res["sample_ocr"]["word_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -34,16 +34,18 @@ def main():
             print("\n================================")
             print(f"{name} [PDF Document]")
             print("================================")
-            pdf_res = analyze_pdf_quality(path)
+            pdf_res = analyze_pdf_quality(path, include_ocr=True)
             print(f"\n[Multi-Page PDF Intake Summary]")
             print(f"Total Pages            : {pdf_res['total_pages']}")
             print(f"Mean Quality Index     : {pdf_res['mean_quality_index']}/100")
             print(f"Bottleneck Page Score  : {pdf_res['bottleneck_quality_index']}/100 (Page {pdf_res['bottleneck_page']})")
             print(f"Overall Intake Decision: {pdf_res['decision']}")
             print(f"Decision Trigger       : {pdf_res['decision_trigger']}")
-            print("\nPage-by-Page Quality Breakdown:")
-            for p_info in pdf_res["summary_table"]:
-                print(f"  - Page {p_info['page']}: Quality Index={p_info['quality_index']:.1f}/100 | Decision={p_info['decision']:12s} | Dominant Risk={p_info['dominant_risk']}")
+            print("\nPage-by-Page Quality & Sample OCR Breakdown:")
+            for p_info, p_res in zip(pdf_res["summary_table"], pdf_res["page_results"]):
+                ocr_p = p_res.get("sample_ocr")
+                ocr_str = f"OCR: {ocr_p['word_count']} words ({ocr_p['average_confidence']:.0f}%)" if ocr_p else "OCR: N/A"
+                print(f"  - Page {p_info['page']}: Quality Index={p_info['quality_index']:.1f}/100 | Decision={p_info['decision']:12s} | {ocr_str}")
             continue
 
         image = cv2.imread(path)
@@ -101,7 +103,7 @@ def main():
             print(f"- {suggestion}")
 
         # 2. Advanced Document Quality Intelligence
-        intel = analyze_document_quality(image)
+        intel = analyze_document_quality(image, include_ocr=True)
         print("\n--- Advanced Quality Intelligence ---")
         print(f"Ensemble Quality Index : {intel['quality_index']}/100")
         print(f"Primary Risk Driver    : {intel['risk_vector']['primary_risk']['label']} (Risk: {intel['risk_vector']['primary_risk']['value']:.2f})")
@@ -109,6 +111,18 @@ def main():
         print(f"Quality Fingerprint    : {intel['fingerprint']['quality_fingerprint']}")
         print(f"Dominant Quality Driver: {intel['sensitivity']['dominant_driver']}")
         print(f"Regional Uniformity    : {intel['multiscale']['diagnosis']}")
+
+        # 3. Downstream Tesseract OCR Sample Output
+        ocr_info = intel.get("sample_ocr")
+        if ocr_info and ocr_info.get("success"):
+            print("\n--- Downstream Tesseract OCR Sample Output ---")
+            print(f"OCR Readiness          : {ocr_info['ocr_readiness']} ({ocr_info['average_confidence']:.1f}% confidence)")
+            print(f"Words / Characters     : {ocr_info['word_count']} words | {ocr_info['character_count']} chars")
+            snippet = ocr_info['preview_snippet'].replace('\n', ' ').strip()
+            if snippet:
+                print(f"Extracted Sample Text  : \"{snippet[:110]}...\"")
+            else:
+                print("Extracted Sample Text  : [None - Blurry or unreadable text prevented OCR]")
 
 
 if __name__ == "__main__":

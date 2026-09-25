@@ -39,6 +39,12 @@ from storage.database import (
     get_history,
     get_analytics_summary
 )
+from cv.ocr import (
+    is_tesseract_available,
+    extract_sample_ocr,
+    generate_ocr_word_overlay,
+    compare_ocr_impact
+)
 
 
 # Initialize Database
@@ -343,7 +349,7 @@ if nav_mode == "Single Document Analysis":
             st.metric("Primary Defect Driver", risk_info["primary_risk"]["label"])
 
         # Tabbed Intelligence Views
-        tab_summary, tab_defects, tab_evidence, tab_forensics, tab_trace, tab_sim, tab_studio, tab_passport = st.tabs([
+        tab_summary, tab_defects, tab_evidence, tab_forensics, tab_trace, tab_sim, tab_studio, tab_passport, tab_ocr = st.tabs([
             "📊 Executive Summary & Radar",
             "🔍 Defect Intelligence Cards",
             "🗺️ Multi-Scale Evidence & Heatmaps",
@@ -351,7 +357,8 @@ if nav_mode == "Single Document Analysis":
             "🧠 Decision Trace & Sensitivity",
             "🧪 What-If Correction Simulator",
             "🎛️ Interactive Restoration Studio",
-            "📜 Audit Passport & Certificate"
+            "📜 Audit Passport & Certificate",
+            "📝 Sample OCR & Downstream Impact"
         ])
 
         # TAB 1: SUMMARY & RADAR PROFILE
@@ -667,6 +674,20 @@ if nav_mode == "Single Document Analysis":
                     mime="image/png"
                 )
 
+                if enable_clahe or enable_denoise or enable_deskew or enable_illum:
+                    with st.expander("📝 Compare Downstream OCR Impact (Raw vs Restored)"):
+                        if is_tesseract_available():
+                            if st.button("⚡ Run OCR Yield Comparison", key="btn_ocr_cmp"):
+                                with st.spinner("Running downstream Tesseract comparison..."):
+                                    cmp_ocr = compare_ocr_impact(image_to_process, restored)
+                                    oc1, oc2, oc3 = st.columns(3)
+                                    oc1.metric("Raw Word Yield", f"{cmp_ocr['raw_word_count']} words")
+                                    oc2.metric("Restored Word Yield", f"{cmp_ocr['restored_word_count']} words", delta=f"{cmp_ocr['word_delta']:+d}")
+                                    oc3.metric("Restored Confidence", f"{cmp_ocr['restored_confidence']:.1f}%", delta=f"{cmp_ocr['confidence_delta']:+.1f}%")
+                                    st.info(f"💡 {cmp_ocr['impact_summary']}")
+                        else:
+                            st.info("Tesseract OCR is not installed or available.")
+
         # TAB 8: AUDIT PASSPORT & CERTIFICATE
         with tab_passport:
             st.subheader("📜 Document Intake Quality Audit Passport")
@@ -683,6 +704,107 @@ if nav_mode == "Single Document Analysis":
 
             st.markdown("#### Live Passport Preview")
             st.components.v1.html(passport_html, height=720, scrolling=True)
+
+        # TAB 9: SAMPLE OCR & DOWNSTREAM IMPACT
+        with tab_ocr:
+            st.subheader("📝 Downstream Tesseract OCR Sample Output")
+            st.write(
+                "Demonstrates downstream text extraction yield and word-level recognition confidence. "
+                "Intake optical defects (blur, low contrast, severe skew, noise) directly degrade OCR accuracy, "
+                "validating why the Document Quality Gate is essential before automated intake."
+            )
+
+            if not is_tesseract_available():
+                st.warning("⚠️ Tesseract OCR engine is not detected on the system PATH. Install `tesseract-ocr` to enable downstream sample output.")
+            else:
+                ocr_cache_key = f"ocr_{doc_name}_{analysis.get('fingerprint', {}).get('quality_fingerprint', '')}"
+
+                col_btn, col_info = st.columns([1, 2])
+                with col_btn:
+                    run_ocr = st.button("🚀 Run Tesseract OCR Sample Extraction", key="btn_ocr_run", use_container_width=True)
+                with col_info:
+                    st.caption("Executes Tesseract 5 engine with automatic page segmentation (PSM 3) to evaluate document machine-readability.")
+
+                if run_ocr:
+                    with st.spinner("Extracting text and calculating word-level recognition confidence..."):
+                        st.session_state[ocr_cache_key] = extract_sample_ocr(image_to_process)
+
+                ocr_result = st.session_state.get(ocr_cache_key, None)
+                if ocr_result is not None:
+                    st.divider()
+
+                    # Metric row
+                    m1, m2, m3, m4 = st.columns(4)
+                    readiness = ocr_result["ocr_readiness"]
+                    if readiness == "OPTIMAL":
+                        r_badge = "🟢 OPTIMAL"
+                    elif readiness == "ACCEPTABLE":
+                        r_badge = "🟡 ACCEPTABLE"
+                    elif readiness == "DEGRADED":
+                        r_badge = "🟠 DEGRADED"
+                    else:
+                        r_badge = "🔴 FAILED"
+
+                    m1.metric("Downstream OCR Readiness", r_badge)
+                    m2.metric("Average Word Confidence", f"{ocr_result['average_confidence']:.1f}%")
+                    m3.metric("Extracted Word Count", f"{ocr_result['word_count']} words")
+                    m4.metric("Character Count", f"{ocr_result['character_count']} chars")
+
+                    # Confidence distribution breakdown
+                    cdist = ocr_result["confidence_distribution"]
+                    st.markdown(
+                        f"**Word Confidence Distribution:** "
+                        f"🟢 **High (≥ 80%):** `{cdist['high']}` words &nbsp;|&nbsp; "
+                        f"🟡 **Medium (50-79%):** `{cdist['medium']}` words &nbsp;|&nbsp; "
+                        f"🔴 **Low (< 50%):** `{cdist['low']}` words"
+                    )
+
+                    # Quality Gate Correlation Callout
+                    q_score = analysis.get("quality_index", analysis.get("overall_score", 0))
+                    decision = analysis.get("decision", "PASS")
+                    if decision == "REJECT":
+                        st.error(
+                            f"🛡️ **Quality Gate Protection Active (Decision: {decision}, Score: {q_score:.1f}/100):** "
+                            f"Downstream OCR recognition achieved only {ocr_result['word_count']} words with "
+                            f"{ocr_result['average_confidence']:.1f}% average confidence. "
+                            f"Rejecting this defective document at intake successfully prevented corrupted text and garbage data "
+                            f"from entering downstream enterprise indexing or automated parsing!"
+                        )
+                    elif decision == "NEEDS REVIEW":
+                        st.warning(
+                            f"⚠️ **Operator Review Justified (Decision: {decision}, Score: {q_score:.1f}/100):** "
+                            f"Downstream OCR average word confidence is {ocr_result['average_confidence']:.1f}% with "
+                            f"{cdist['low']} low-confidence tokens. Human verification or guided rescan is warranted."
+                        )
+                    else:
+                        st.success(
+                            f"✅ **High-Fidelity Machine Intake (Decision: {decision}, Score: {q_score:.1f}/100):** "
+                            f"Document passes quality gates cleanly. Downstream OCR achieved {ocr_result['average_confidence']:.1f}% "
+                            f"confidence across {ocr_result['word_count']} words with minimal recognition errors."
+                        )
+
+                    st.markdown("---")
+
+                    # View switcher: Text snippet vs Spatial Bounding Box overlay
+                    ocr_view = st.radio(
+                        "Downstream Output Display Mode:",
+                        ["🔤 Extracted Text Stream", "🎯 Spatial Word Confidence Bounding Boxes"],
+                        horizontal=True
+                    )
+
+                    if ocr_view == "🔤 Extracted Text Stream":
+                        if ocr_result["extracted_text"]:
+                            st.markdown("##### Extracted OCR Text Content:")
+                            st.code(ocr_result["extracted_text"], language="text")
+                        else:
+                            st.info("No readable text was detected by Tesseract OCR due to document degradation.")
+                    else:
+                        st.markdown("##### Word Confidence Spatial Overlay (Color-Coded):")
+                        st.caption("🟢 Green: High Confidence (≥ 80%) | 🟠 Orange: Medium (50-79%) | 🔴 Red: Low (< 50%)")
+                        overlay_img = generate_ocr_word_overlay(image_to_process, ocr_result)
+                        st.image(bgr_to_rgb(overlay_img), use_container_width=True)
+                else:
+                    st.info("💡 Click **'Run Tesseract OCR Sample Extraction'** above to test downstream text recognition on this document.")
 
 
 # -------------------------------------------------------------

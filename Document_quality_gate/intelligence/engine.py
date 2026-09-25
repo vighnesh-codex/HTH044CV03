@@ -10,6 +10,7 @@ import numpy as np
 
 from cv.preprocessing import validate_and_preprocess
 from cv.pdf_loader import is_pdf, load_pdf_pages
+from cv.ocr import extract_sample_ocr
 from cv.blur import analyze_blur
 from cv.contrast import analyze_contrast
 from cv.skew import analyze_skew
@@ -73,15 +74,21 @@ def generate_engine_suggestions(defects: Dict[str, Any], structure: Dict[str, An
 
 def analyze_document_quality(
     image: np.ndarray,
-    historical_feature_matrix: Optional[list] = None
+    historical_feature_matrix: Optional[list] = None,
+    include_ocr: bool = False
 ) -> Dict[str, Any]:
     """
     Performs comprehensive Document Quality Intelligence analysis on an input image.
 
+    Args:
+        image: Document image array (BGR or Grayscale) or PDF input.
+        historical_feature_matrix: Optional cohort feature vectors for anomaly detection.
+        include_ocr: If True, executes downstream Tesseract OCR sample text extraction.
+
     Returns:
         Master dictionary with all CV defects, multi-scale grid, ensemble scores,
         risk vector, explainable decision trace, sensitivity analysis, fingerprint,
-        and anomaly status.
+        anomaly status, and optional downstream sample OCR extraction.
     """
     bgr, gray, meta = validate_and_preprocess(image)
 
@@ -179,6 +186,9 @@ def analyze_document_quality(
         "fingerprint": fingerprint_res,
         "anomaly": anomaly_res,
 
+        # Downstream OCR Verification
+        "sample_ocr": extract_sample_ocr(bgr) if include_ocr else None,
+
         # Metadata
         "image_metadata": meta
     }
@@ -188,7 +198,8 @@ def analyze_pdf_quality(
     pdf_source: Any,
     scale: float = 2.0,
     max_pages: Optional[int] = None,
-    progress_callback = None
+    progress_callback = None,
+    include_ocr: bool = False
 ) -> Dict[str, Any]:
     """
     Analyzes all pages of a multi-page PDF document and produces a unified
@@ -199,6 +210,7 @@ def analyze_pdf_quality(
         scale: Resolution multiplier for rasterization (default 2.0 = ~144 DPI).
         max_pages: Optional maximum number of pages to inspect.
         progress_callback: Optional callable(current_page, total_pages, message).
+        include_ocr: If True, runs Tesseract OCR sample text extraction on each page.
 
     Returns:
         Master dictionary with aggregate quality metrics, bottleneck analysis,
@@ -216,7 +228,7 @@ def analyze_pdf_quality(
     for idx, (p_num, bgr_img, p_meta) in enumerate(pages_data):
         if progress_callback:
             progress_callback(idx + 1, len(pages_data), f"Page {p_num}")
-        page_analysis = analyze_document_quality(bgr_img)
+        page_analysis = analyze_document_quality(bgr_img, include_ocr=include_ocr)
         page_analysis["page_number"] = p_num
         page_analysis["page_metadata"] = p_meta
         page_results.append(page_analysis)
